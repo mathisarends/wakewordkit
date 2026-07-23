@@ -1,3 +1,4 @@
+import time
 import warnings
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
@@ -23,13 +24,18 @@ class WakeWordDetector:
         *wake_words: WakeWordSpec | Iterable[WakeWordSpec],
         threshold: float = 0.5,
         vad_threshold: float = 0.0,
+        cooldown: float = 1.5,
     ) -> None:
         if not 0.0 <= threshold <= 1.0:
             raise ValueError("threshold must be between 0.0 and 1.0.")
+        if cooldown < 0.0:
+            raise ValueError("cooldown must be non-negative.")
 
         specs = _flatten(wake_words) or list(WakeWord)
 
         self._threshold = threshold
+        self._cooldown = cooldown
+        self._last_trigger: float | None = None
         self._labels: dict[str, str] = {}
         paths: list[str] = []
         for spec in specs:
@@ -48,6 +54,10 @@ class WakeWordDetector:
         return self._threshold
 
     @property
+    def cooldown(self) -> float:
+        return self._cooldown
+
+    @property
     def names(self) -> tuple[str, ...]:
         return tuple(self._labels.values())
 
@@ -61,9 +71,19 @@ class WakeWordDetector:
     def stream(self, source: Iterable[bytes | np.ndarray]) -> Iterator[Detection]:
         for frame in source:
             detection = self.process(frame)
-            if detection is not None:
-                yield detection
-                self._model.reset()
+            if detection is None:
+                continue
+
+            now = time.monotonic()
+            if (
+                self._last_trigger is not None
+                and now - self._last_trigger < self._cooldown
+            ):
+                continue
+
+            self._last_trigger = now
+            yield detection
+            self._model.reset()
 
     def listen(self, source: AudioInput | None = None) -> Iterator[Detection]:
         with source or Microphone() as audio:
@@ -71,6 +91,7 @@ class WakeWordDetector:
 
     def reset(self) -> None:
         self._model.reset()
+        self._last_trigger = None
 
 
 def _flatten(
