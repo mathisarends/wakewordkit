@@ -291,8 +291,9 @@ wheels = [
 [[package]]
 name = "wakewordkit"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
+    { name = "numpy" },
     { name = "openwakeword" },
 ]
 
@@ -303,6 +304,7 @@ mic = [
 
 [package.metadata]
 requires-dist = [
+    { name = "numpy", specifier = ">=2.0" },
     { name = "openwakeword", specifier = ">=0.4.0" },
     { name = "sounddevice", marker = "extra == 'mic'", specifier = ">=0.5.5" },
 ]

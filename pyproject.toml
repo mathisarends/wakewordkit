@@ -1,10 +1,19 @@
 [project]
 name = "wakewordkit"
 version = "0.1.0"
-description = "Add your description here"
+description = "Lightweight, developer-friendly wake word detection built on openWakeWord."
 readme = "README.md"
 requires-python = ">=3.14"
+license = "MIT"
+keywords = ["wake-word", "keyword-spotting", "openwakeword", "voice", "speech"]
+classifiers = [
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Typing :: Typed",
+]
 dependencies = [
+    "numpy>=2.0",
     "openwakeword>=0.4.0",
 ]
 
@@ -12,3 +21,17 @@ dependencies = [
 mic = [
     "sounddevice>=0.5.5",
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["wakewordkit"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
