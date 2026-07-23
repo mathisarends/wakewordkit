@@ -3,11 +3,13 @@ name = "wakewordkit"
 version = "0.1.0"
 description = "Lightweight, developer-friendly wake word detection built on openWakeWord."
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 license = "MIT"
 keywords = ["wake-word", "keyword-spotting", "openwakeword", "voice", "speech"]
 classifiers = [
     "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Topic :: Multimedia :: Sound/Audio :: Speech",
     "Typing :: Typed",
@@ -31,7 +33,7 @@ packages = ["wakewordkit"]
 
 [tool.ruff]
 line-length = 88
-target-version = "py314"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

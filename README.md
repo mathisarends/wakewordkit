@@ -4,7 +4,7 @@ Lightweight, developer-friendly wake word detection built on
 [openWakeWord](https://github.com/dscripka/openWakeWord).
 
 Ships with every default openWakeWord wake word and lets you plug in your own
-trained models through the same tiny API. Requires Python 3.14+.
+trained models through the same tiny API. Requires Python 3.12+.
 
 ## Install
 
