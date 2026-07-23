@@ -35,3 +35,20 @@ target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=wakewordkit --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["wakewordkit"]
+
+[tool.coverage.report]
+exclude_also = ["raise NotImplementedError", "@(abc\\.)?abstractmethod"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.16.0",
+]

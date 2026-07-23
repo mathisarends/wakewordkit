@@ -84,6 +84,7 @@ it to `listen()`:
 ```python
 from wakewordkit import AudioInput, WakeWordDetector, WakeWord
 
+
 class FileInput(AudioInput):
     def __init__(self, path):
         self._reader = open_pcm(path)
@@ -93,6 +94,7 @@ class FileInput(AudioInput):
         if not frame:
             raise StopIteration
         return frame
+
 
 detector = WakeWordDetector(WakeWord.HEY_MYCROFT)
 for detection in detector.listen(FileInput("recording.pcm")):
@@ -108,7 +110,7 @@ required method.
 | --- | --- |
 | `WakeWord` | Enum of built-in wake words. |
 | `CustomWakeWord(name, model)` | Wraps a custom `.onnx` model under a chosen name. |
-| `WakeWordDetector(*wake_words, threshold=0.5, vad_threshold=0.0)` | The detector. |
+| `WakeWordDetector(*wake_words, threshold=0.5, vad_threshold=0.0, cooldown=1.5)` | The detector. |
 | `WakeWordDetector.listen(source=None)` | Iterate detections from an `AudioInput` (defaults to `Microphone`). |
 | `WakeWordDetector.stream(source)` | Iterate detections from your own frames. |
 | `WakeWordDetector.process(frame)` | Score a single frame, returns `Detection` or `None`. |
@@ -118,4 +120,14 @@ required method.
 | `Microphone(*, samplerate=16000, frame_size=1280, device=None)` | Context-managed 16 kHz mic (`AudioInput`). |
 
 `vad_threshold` (0 disables) turns on openWakeWord's Silero voice-activity
-filter to suppress non-speech false triggers.
+filter to suppress non-speech false triggers. `cooldown` is the minimum number
+of seconds between two detections, so a single utterance triggers only once.
+
+## Development
+
+```bash
+uv sync --dev
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest
+```

@@ -42,7 +42,7 @@ class Microphone(AudioInput):
         self._device = device
         self._stream = None
 
-    def __enter__(self) -> Self:
+    def __enter__(self) -> Self:  # pragma: no cover - requires audio hardware
         sd = _import_sounddevice()
         self._stream = sd.InputStream(
             samplerate=self._samplerate,
