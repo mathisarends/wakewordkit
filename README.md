@@ -127,7 +127,11 @@ of seconds between two detections, so a single utterance triggers only once.
 
 ```bash
 uv sync --dev
-uv run ruff check .
-uv run ruff format --check .
 uv run pytest
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
