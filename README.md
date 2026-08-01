@@ -77,6 +77,38 @@ for detection in detector.stream(my_audio_source):
     handle(detection)
 ```
 
+## asyncio
+
+Every method has an async twin: `alisten()` for a blocking `AudioInput` (reads
+run in the default executor) and `astream()` for your own async frames.
+
+```python
+detector = WakeWordDetector(WakeWord.HEY_MYCROFT)
+
+async for detection in detector.alisten():
+    await handle(detection)
+```
+
+No frames are read while the body of the `async for` runs, so handling a
+detection pauses detection without pausing the underlying capture — useful when
+the microphone is shared with a recorder.
+
+Already have a microphone object? `CallableInput` adapts it without subclassing:
+
+```python
+from wakewordkit import CallableInput
+
+source = CallableInput(my_mic.read, 1280)  # calls my_mic.read(1280)
+
+async for detection in detector.alisten(source):
+    await handle(detection)
+```
+
+`CallableInput` never closes the underlying source unless you pass
+`close=my_mic.close`, so sharing a stream is safe.
+
+## Bring your own audio source
+
 `Microphone` is only one implementation of the `AudioInput` interface. Subclass
 it to plug in any source — a socket, a file, another capture library — and pass
 it to `listen()`:
@@ -113,10 +145,13 @@ required method.
 | `WakeWordDetector(*wake_words, threshold=0.5, vad_threshold=0.0, cooldown=1.5)` | The detector. |
 | `WakeWordDetector.listen(source=None)` | Iterate detections from an `AudioInput` (defaults to `Microphone`). |
 | `WakeWordDetector.stream(source)` | Iterate detections from your own frames. |
+| `WakeWordDetector.alisten(source=None)` | `listen()` for asyncio; reads in the default executor. |
+| `WakeWordDetector.astream(source)` | `stream()` for asyncio; takes an async iterable of frames. |
 | `WakeWordDetector.process(frame)` | Score a single frame, returns `Detection` or `None`. |
 | `WakeWordDetector.reset()` | Clear detection state. |
 | `Detection(name, score)` | A single detection result. |
 | `AudioInput` | Abstract audio source; implement `read()`. |
+| `CallableInput(read, frame_size=None, *, close=None)` | Wrap an existing read function as an `AudioInput`. |
 | `Microphone(*, samplerate=16000, frame_size=1280, device=None)` | Context-managed 16 kHz mic (`AudioInput`). |
 
 `vad_threshold` (0 disables) turns on openWakeWord's Silero voice-activity

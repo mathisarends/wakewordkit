@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from wakewordkit import (
@@ -145,3 +147,55 @@ def test_listen_consumes_and_closes_provided_source(fake_model):
 
     assert len(detections) == 2
     assert source.entered and source.exited
+
+
+def collect(agen):
+    async def run():
+        return [item async for item in agen]
+
+    return asyncio.run(run())
+
+
+async def frames(count):
+    for _ in range(count):
+        yield FRAME
+
+
+def test_alisten_consumes_and_closes_provided_source(fake_model):
+    detector = WakeWordDetector(WakeWord.ALEXA, threshold=0.5, cooldown=0.0)
+    detector._model.scores = {ALEXA_KEY: 0.9}
+    source = ListInput([FRAME, FRAME])
+
+    detections = collect(detector.alisten(source))
+
+    assert detections == [Detection("alexa", 0.9)] * 2
+    assert source.entered and source.exited
+
+
+def test_alisten_debounces_within_cooldown(fake_model, clock):
+    detector = WakeWordDetector(WakeWord.ALEXA, threshold=0.5, cooldown=1.5)
+    detector._model.scores = {ALEXA_KEY: 0.9}
+
+    class Clocked(ListInput):
+        def read(self):
+            clock.now = next(self._times)
+            return super().read()
+
+    source = Clocked([FRAME] * 4)
+    source._times = iter((0.0, 0.5, 1.0, 2.0))
+
+    assert collect(detector.alisten(source)) == [Detection("alexa", 0.9)] * 2
+    assert detector._model.reset_calls == 2
+
+
+def test_astream_yields_detections_from_async_frames(fake_model, clock):
+    detector = WakeWordDetector(WakeWord.ALEXA, threshold=0.5, cooldown=0.0)
+    detector._model.scores = {ALEXA_KEY: 0.9}
+    assert collect(detector.astream(frames(3))) == [Detection("alexa", 0.9)] * 3
+
+
+def test_astream_skips_negative_frames(fake_model, clock):
+    detector = WakeWordDetector(WakeWord.ALEXA, threshold=0.5, cooldown=0.0)
+    detector._model.scores = {ALEXA_KEY: 0.1}
+    assert collect(detector.astream(frames(2))) == []
+    assert detector._model.reset_calls == 0
