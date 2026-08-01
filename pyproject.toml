@@ -1,6 +1,6 @@
 [project]
 name = "wakewordkit"
-version = "0.1.0"
+version = "0.2.0"
 description = "Lightweight, developer-friendly wake word detection built on openWakeWord."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -16,7 +16,10 @@ classifiers = [
 ]
 dependencies = [
     "numpy>=2.0",
-    "openwakeword>=0.4.0",
+    # Pinned: 0.4.0 is the last release that bundles the .onnx models in the
+    # wheel. Later versions download them at runtime and rename the model
+    # argument to `wakeword_models=`, which silently loads every model instead.
+    "openwakeword==0.4.0",
 ]
 
 [project.optional-dependencies]
