@@ -3,7 +3,7 @@ import sys
 import numpy as np
 import pytest
 
-from wakewordkit import AudioInput, Microphone
+from wakewordkit import AudioInput, CallableInput, Microphone
 from wakewordkit.audio import _import_sounddevice
 
 
@@ -44,6 +44,28 @@ def test_audio_input_is_a_reusable_context_manager():
     source = Frames([b"a"])
     with source as entered:
         assert entered is source
+
+
+def test_callable_input_passes_the_frame_size():
+    source = CallableInput(lambda n: b"x" * n, 1280)
+    assert source.read() == b"x" * 1280
+
+
+def test_callable_input_omits_the_frame_size_when_unset():
+    source = CallableInput(lambda: b"x")
+    assert source.read() == b"x"
+
+
+def test_callable_input_leaves_a_shared_source_open_by_default():
+    with CallableInput(lambda: b"x") as source:
+        assert source.read() == b"x"
+
+
+def test_callable_input_closes_on_exit_when_given_a_closer():
+    calls = []
+    with CallableInput(lambda: b"x", close=lambda: calls.append(1)):
+        pass
+    assert calls == [1]
 
 
 def test_microphone_is_an_audio_input():

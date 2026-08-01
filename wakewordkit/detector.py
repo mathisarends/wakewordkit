@@ -1,13 +1,14 @@
+import asyncio
 import time
 import warnings
-from collections.abc import Iterable, Iterator
+from collections.abc import AsyncIterable, AsyncIterator, Iterable, Iterator
 from dataclasses import dataclass
 
 import numpy as np
 from openwakeword.model import Model
 
-from .audio import AudioInput, Microphone
-from .models import CustomWakeWord, WakeWord
+from wakewordkit.audio import AudioInput, Microphone
+from wakewordkit.models import CustomWakeWord, WakeWord
 
 type WakeWordSpec = WakeWord | CustomWakeWord
 
@@ -70,18 +71,9 @@ class WakeWordDetector:
 
     def stream(self, source: Iterable[bytes | np.ndarray]) -> Iterator[Detection]:
         for frame in source:
-            detection = self.process(frame)
+            detection = self._triggered(frame)
             if detection is None:
                 continue
-
-            now = time.monotonic()
-            if (
-                self._last_trigger is not None
-                and now - self._last_trigger < self._cooldown
-            ):
-                continue
-
-            self._last_trigger = now
             yield detection
             self._model.reset()
 
@@ -89,9 +81,68 @@ class WakeWordDetector:
         with source or Microphone() as audio:
             yield from self.stream(audio)
 
+    async def astream(
+        self, source: AsyncIterable[bytes | np.ndarray]
+    ) -> AsyncIterator[Detection]:
+        async for frame in source:
+            detection = self._triggered(frame)
+            if detection is None:
+                continue
+            yield detection
+            self._model.reset()
+
+    async def alisten(
+        self, source: AudioInput | None = None
+    ) -> AsyncIterator[Detection]:
+        """Iterate detections from a blocking `AudioInput` without blocking the loop.
+
+        Reads run in the default executor. No frames are read while the body of
+        the `async for` runs, so handling a detection naturally pauses detection
+        without pausing the underlying capture.
+        """
+        loop = asyncio.get_running_loop()
+        with source or Microphone() as audio:
+            while True:
+                frame = await loop.run_in_executor(None, _read_or_eof, audio)
+                if frame is _EOF:
+                    return
+                detection = self._triggered(frame)
+                if detection is None:
+                    continue
+                yield detection
+                self._model.reset()
+
     def reset(self) -> None:
         self._model.reset()
         self._last_trigger = None
+
+    def _triggered(self, frame: bytes | np.ndarray) -> Detection | None:
+        """Score a frame, returning it only if it also clears the cooldown."""
+        detection = self.process(frame)
+        if detection is None:
+            return None
+
+        now = time.monotonic()
+        if self._last_trigger is not None and now - self._last_trigger < self._cooldown:
+            return None
+
+        self._last_trigger = now
+        return detection
+
+
+_EOF = object()
+
+
+def _read_or_eof(source: AudioInput) -> bytes | np.ndarray | object:
+    """Read one frame, mapping end-of-stream to a sentinel.
+
+    `StopIteration` cannot cross a future boundary, so it never leaves the
+    executor thread.
+    """
+    try:
+        return source.read()
+    except StopIteration:
+        return _EOF
 
 
 def _flatten(

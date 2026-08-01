@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Self
 
 import numpy as np
@@ -27,6 +27,44 @@ class AudioInput(ABC):
 
     def __next__(self) -> bytes | np.ndarray:
         return self.read()
+
+
+class CallableInput(AudioInput):
+    """Adapt an existing read function into an `AudioInput`.
+
+    Use this to plug a microphone you already own into a detector without
+    subclassing. `frame_size` is passed to `read` when given, so both
+    `read()` and `read(1280)` style callables work. `close` is only called on
+    context-manager exit if you provide it, so a shared stream stays open.
+
+    Example:
+        ```python
+        source = CallableInput(my_microphone.read, frame_size=1280)
+
+        with source:
+            frame = source.read()  # calls my_microphone.read(1280)
+        ```
+    """
+
+    def __init__(
+        self,
+        read: Callable[..., bytes | np.ndarray],
+        frame_size: int | None = None,
+        *,
+        close: Callable[[], None] | None = None,
+    ) -> None:
+        self._read = read
+        self._frame_size = frame_size
+        self._close = close
+
+    def read(self) -> bytes | np.ndarray:
+        if self._frame_size is None:
+            return self._read()
+        return self._read(self._frame_size)
+
+    def __exit__(self, *exc: object) -> None:
+        if self._close is not None:
+            self._close()
 
 
 class Microphone(AudioInput):
