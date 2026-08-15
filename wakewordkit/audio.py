@@ -288,7 +288,7 @@ class _SoundDeviceCapture:
         finally:
             # Closing from the event-loop task also interrupts a pending
             # blocking read during cancellation.
-            source.close()
+            await asyncio.to_thread(source.close)
 
 
 def _import_sounddevice():
