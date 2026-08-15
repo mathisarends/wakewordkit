@@ -1,6 +1,6 @@
 [project]
 name = "wakewordkit"
-version = "0.3.0"
+version = "0.4.0"
 description = "Lightweight, developer-friendly wake word detection built on openWakeWord."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -23,7 +23,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mic = [
+examples = [
+    "openai>=2.46.0,<4",
+    "python-dotenv>=1.1.0",
     "sounddevice>=0.5.5",
 ]
 
