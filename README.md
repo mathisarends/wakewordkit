@@ -164,7 +164,8 @@ uv run pytest
 ```
 
 Runnable examples are in [`examples`](examples), including a visible
-microphone-to-STT handoff and detection from an externally managed WAV stream.
+microphone-to-STT handoff, externally managed WAV detection, and a WAV-backed
+implementation of the `AudioDevice` contract with full handoff.
 
 ## License
 
