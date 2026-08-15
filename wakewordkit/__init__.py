@@ -1,15 +1,22 @@
-from .audio import AudioInput, CallableInput, Microphone
-from .detector import Detection, WakeWordDetector, WakeWordSpec
+from .audio import (
+    MODEL_AUDIO_FORMAT,
+    AudioFormat,
+    AudioStream,
+    AudioStreamStats,
+)
+from .detector import Activation, Detection, WakeWordDetector, WakeWordSpec
 from .models import CustomWakeWord, WakeWord
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
-    "AudioInput",
-    "CallableInput",
+    "AudioFormat",
+    "AudioStream",
+    "AudioStreamStats",
+    "Activation",
     "CustomWakeWord",
     "Detection",
-    "Microphone",
+    "MODEL_AUDIO_FORMAT",
     "WakeWord",
     "WakeWordDetector",
     "WakeWordSpec",
