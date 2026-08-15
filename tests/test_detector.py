@@ -1,3 +1,5 @@
+import asyncio
+
 import numpy as np
 import pytest
 
@@ -44,22 +46,24 @@ def test_process_converts_explicit_format_and_detects(fake_model):
     format = AudioFormat(24_000, 2, "pcm_s16le")
     frame = np.tile(np.array([100, 300], dtype=np.int16), 12).tobytes()
 
-    assert detector.process(frame, format=format) == Detection("alexa", 0.9)
+    assert asyncio.run(detector.process(frame, format=format)) == Detection(
+        "alexa", 0.9
+    )
     assert detector._model.inputs[0].dtype == np.int16
     assert detector._model.inputs[0].size == 8
 
 
 def test_process_returns_none_below_threshold(fake_model):
     detector = detector_with_scores(fake_model, [NEGATIVE])
-    assert detector.process(pcm(1)) is None
+    assert asyncio.run(detector.process(pcm(1))) is None
 
 
 def test_process_applies_cooldown_and_resets_after_detection(fake_model):
     detector = WakeWordDetector(WakeWord.ALEXA, cooldown=60)
     detector._model.score_sequence = [POSITIVE, POSITIVE]
 
-    assert detector.process(pcm(1)) == Detection("alexa", 0.9)
-    assert detector.process(pcm(2)) is None
+    assert asyncio.run(detector.process(pcm(1))) == Detection("alexa", 0.9)
+    assert asyncio.run(detector.process(pcm(2))) is None
     assert detector._model.reset_calls == 1
 
 

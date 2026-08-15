@@ -19,11 +19,7 @@ async def main() -> None:
         print('Say "Hey Jarvis"...')
         while True:
             frame = await microphone.read()
-            detection = await asyncio.to_thread(
-                detector.process,
-                frame,
-                format=microphone.format,
-            )
+            detection = await detector.process(frame, format=microphone.format)
             if detection is not None:
                 print(f"Detected {detection.name} ({detection.score:.2f})")
                 break

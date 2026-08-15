@@ -78,11 +78,7 @@ async def _record_utterance(
     while True:
         frame = await microphone.read()
         preroll.append(frame)
-        detection = await asyncio.to_thread(
-            detector.process,
-            frame,
-            format=microphone.format,
-        )
+        detection = await detector.process(frame, format=microphone.format)
         if detection is not None:
             break
 

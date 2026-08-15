@@ -30,29 +30,26 @@ audio_format = AudioFormat(
     sample_format="pcm_s16le",
 )
 
-while chunk := microphone.read():
-    detection = detector.process(chunk, format=audio_format)
+while chunk := await microphone.read():
+    detection = await detector.process(chunk, format=audio_format)
     if detection is not None:
         print(detection.name, detection.score)
 ```
 
-`process()` never takes ownership of the source. Audio capture, buffering,
+`process()` moves synchronous model inference off the event loop and never
+takes ownership of the source. Audio capture, buffering,
 pre-roll, STT handoff, and device shutdown remain the application's
 responsibility.
 
 ## Asynchronous applications
 
-The application also owns iteration and scheduling. Move synchronous model work
-off the event loop when appropriate:
+The application owns iteration and routing while WakewordKit handles the
+synchronous model boundary internally:
 
 ```python
 while True:
     frame = await microphone.read()
-    detection = await asyncio.to_thread(
-        detector.process,
-        frame,
-        format=microphone.format,
-    )
+    detection = await detector.process(frame, format=microphone.format)
     if detection is not None:
         await handle(detection)
 ```

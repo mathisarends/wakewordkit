@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 import warnings
@@ -68,13 +69,20 @@ class WakeWordDetector:
     def names(self) -> tuple[str, ...]:
         return tuple(self._labels.values())
 
-    def process(
+    async def process(
         self,
         frame: bytes | np.ndarray,
         *,
         format: AudioFormat = MODEL_AUDIO_FORMAT,
     ) -> Detection | None:
-        """Process one frame without taking ownership of its source."""
+        """Process one frame asynchronously without owning its source."""
+        return await asyncio.to_thread(self._process, frame, format)
+
+    def _process(
+        self,
+        frame: bytes | np.ndarray,
+        format: AudioFormat,
+    ) -> Detection | None:
         with self._model_lock:
             if self._process_normalizer is None or self._process_format != format:
                 self._process_normalizer = _StreamingNormalizer(format)
