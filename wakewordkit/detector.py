@@ -6,6 +6,7 @@ import time
 import warnings
 from collections import deque
 from collections.abc import AsyncIterable, AsyncIterator, Iterable
+from contextlib import suppress
 from dataclasses import dataclass
 
 import numpy as np
@@ -13,10 +14,10 @@ from openwakeword.model import Model
 
 from wakewordkit.audio import (
     MODEL_AUDIO_FORMAT,
+    AudioDevice,
     AudioFormat,
     AudioStream,
-    _AudioInput,
-    _Microphone,
+    _SoundDeviceCapture,
 )
 from wakewordkit.models import CustomWakeWord, WakeWord
 
@@ -43,6 +44,7 @@ class WakeWordDetector:
         threshold: float = 0.5,
         vad_threshold: float = 0.0,
         cooldown: float = 1.5,
+        capture: AudioDevice | None = None,
     ) -> None:
         if not 0.0 <= threshold <= 1.0:
             raise ValueError("threshold must be between 0.0 and 1.0.")
@@ -60,6 +62,7 @@ class WakeWordDetector:
         self._process_format: AudioFormat | None = None
         self._session_guard = threading.Lock()
         self._session: _ListenSession | None = None
+        self._capture = capture
 
         paths: list[str] = []
         for spec in specs:
@@ -136,20 +139,34 @@ class WakeWordDetector:
         consumer. Overflow drops oldest chunks and is visible in
         ``activation.audio.stats``.
         """
-        session = self._start_session(
+        if self._capture is not None and (
+            device is not None
+            or sample_rate != 16_000
+            or channels != 1
+            or sample_format != "pcm_s16le"
+            or frame_size != 1_280
+        ):
+            raise ValueError(
+                "A custom capture device owns its audio configuration; "
+                "device, format, and frame_size arguments cannot be passed "
+                "to listen()."
+            )
+        capture = self._capture or _SoundDeviceCapture(
             device=device,
             sample_rate=sample_rate,
             channels=channels,
             sample_format=sample_format,
-            preroll=preroll,
-            max_buffer=max_buffer,
             frame_size=frame_size,
         )
+        session = self._start_session(
+            capture=capture,
+            preroll=preroll,
+            max_buffer=max_buffer,
+        )
         try:
-            return await asyncio.to_thread(session.wait)
+            return await session.activation
         except BaseException:
-            session.stop()
-            await asyncio.to_thread(session.join)
+            await session.aclose()
             raise
 
     def reset(self) -> None:
@@ -183,6 +200,12 @@ class WakeWordDetector:
                 self._model.reset()
             return detection
 
+    def _process_capture_frame(
+        self, normalizer: _StreamingNormalizer, frame: bytes
+    ) -> Detection | None:
+        with self._model_lock:
+            return self._predict(normalizer.feed(frame))
+
     def _predict(self, normalized: np.ndarray) -> Detection | None:
         if normalized.size == 0:
             return None
@@ -214,103 +237,81 @@ class _ListenSession:
         self,
         detector: WakeWordDetector,
         *,
-        source: _AudioInput | None = None,
-        device: int | str | None = None,
-        sample_rate: int = 16_000,
-        channels: int = 1,
-        sample_format: str = "pcm_s16le",
+        capture: AudioDevice,
         preroll: float = 0.2,
         max_buffer: float = 10.0,
-        frame_size: int = 1_280,
     ) -> None:
         if preroll < 0:
             raise ValueError("preroll must be non-negative.")
         if max_buffer <= 0:
             raise ValueError("max_buffer must be positive.")
         self.detector = detector
-        self.source = (
-            source
-            if source is not None
-            else _Microphone(
-                device=device,
-                sample_rate=sample_rate,
-                channels=channels,
-                sample_format=sample_format,
-                frame_size=frame_size,
-            )
-        )
-        self.format = self.source.format
-        self.preroll_bytes = int(preroll * self.format.bytes_per_second)
-        alignment = self.format.channels * self.format.bytes_per_sample
-        self.preroll_bytes = self.preroll_bytes // alignment * alignment
-        configured_max = int(max_buffer * self.format.bytes_per_second)
-        detection_frame_bytes = frame_size * alignment
-        self.max_buffer_bytes = max(
-            configured_max,
-            self.preroll_bytes + detection_frame_bytes,
-            alignment,
-        )
-        self._ready = threading.Event()
-        self._stop = threading.Event()
-        self._thread = threading.Thread(
-            target=self._run, name="wakewordkit-capture", daemon=True
-        )
-        self._activation: Activation | None = None
-        self._error: BaseException | None = None
+        self.capture = capture
+        self.preroll = preroll
+        self.max_buffer = max_buffer
+        self._loop = asyncio.get_running_loop()
+        self.activation: asyncio.Future[Activation] = self._loop.create_future()
+        self._task: asyncio.Task[None] | None = None
+        self._stopping = False
         self._stream: AudioStream | None = None
 
     @property
     def done(self) -> bool:
-        return not self._thread.is_alive() and self._thread.ident is not None
+        return self._task is not None and self._task.done()
 
     def start(self) -> None:
-        self._thread.start()
-
-    def wait(self) -> Activation:
-        self._ready.wait()
-        if self._activation is not None:
-            return self._activation
-        if self._error is not None:
-            raise self._error
-        raise EOFError("Audio input ended before a wake word was detected.")
+        self._task = asyncio.create_task(self._run(), name="wakewordkit-capture")
 
     def stop(self) -> None:
-        self._stop.set()
-        close = getattr(self.source, "close", None)
-        if close is not None:
-            close()
+        self._loop.call_soon_threadsafe(self._cancel)
 
-    def join(self) -> None:
-        if threading.current_thread() is not self._thread:
-            self._thread.join()
+    def _cancel(self) -> None:
+        self._stopping = True
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
 
-    def _run(self) -> None:
-        preroll: deque[bytes] = deque()
-        preroll_size = 0
-        normalizer = _StreamingNormalizer(self.format)
-        activated = False
+    async def aclose(self) -> None:
+        self._cancel()
+        if self._task is not None:
+            with suppress(asyncio.CancelledError):
+                await self._task
+
+    async def _run(self) -> None:
         try:
-            self.detector._reset_runtime()
-            with self.source as source:
-                while not self._stop.is_set():
-                    try:
-                        raw = source.read()
-                    except StopIteration:
-                        break
-                    chunk = _frame_as_bytes(raw, self.format)
+            await asyncio.to_thread(self.detector._reset_runtime)
+            async with self.capture.open() as captured:
+                format = captured.format
+                preroll_bytes = int(self.preroll * format.bytes_per_second)
+                alignment = format.channels * format.bytes_per_sample
+                preroll_bytes = preroll_bytes // alignment * alignment
+                configured_max = max(
+                    int(self.max_buffer * format.bytes_per_second), alignment
+                )
+                preroll: deque[bytes] = deque()
+                preroll_size = 0
+                normalizer = _StreamingNormalizer(format)
+                activated = False
+
+                async for raw in captured.frames:
+                    if not isinstance(raw, bytes | bytearray | memoryview):
+                        raise TypeError("AudioDevice frames must be bytes-like.")
+                    chunk = bytes(raw)
                     if activated:
                         assert self._stream is not None
                         self._stream._put(chunk)
                         continue
 
-                    with self.detector._model_lock:
-                        detection = self.detector._predict(normalizer.feed(raw))
+                    detection = await asyncio.to_thread(
+                        self.detector._process_capture_frame,
+                        normalizer,
+                        chunk,
+                    )
                     if detection is None:
-                        if self.preroll_bytes:
+                        if preroll_bytes:
                             preroll.append(chunk)
                             preroll_size += len(chunk)
-                            while preroll and preroll_size > self.preroll_bytes:
-                                excess = preroll_size - self.preroll_bytes
+                            while preroll and preroll_size > preroll_bytes:
+                                excess = preroll_size - preroll_bytes
                                 first = preroll[0]
                                 if excess >= len(first):
                                     preroll.popleft()
@@ -321,8 +322,8 @@ class _ListenSession:
                         continue
 
                     stream = AudioStream(
-                        self.format,
-                        max_buffer_bytes=self.max_buffer_bytes,
+                        format,
+                        max_buffer_bytes=max(configured_max, preroll_size + len(chunk)),
                         on_close=self.stop,
                     )
                     # Pre-roll contains only frames before detection. The
@@ -332,21 +333,25 @@ class _ListenSession:
                         stream._put(buffered)
                     stream._put(chunk)
                     self._stream = stream
-                    self._activation = Activation(
-                        detection.name, detection.score, stream
-                    )
                     activated = True
-                    self._ready.set()
-        except BaseException as exc:
+                    self.activation.set_result(
+                        Activation(detection.name, detection.score, stream)
+                    )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
             if self._stream is not None:
                 self._stream._finish(exc)
-            else:
-                self._error = exc
+            elif not self.activation.done():
+                self.activation.set_exception(exc)
         finally:
-            self.detector._reset_runtime()
+            await asyncio.to_thread(self.detector._reset_runtime)
             if self._stream is not None:
                 self._stream._finish()
-            self._ready.set()
+            elif not self.activation.done():
+                self.activation.set_exception(
+                    EOFError("Audio input ended before a wake word was detected.")
+                )
             self.detector._session_done(self)
 
 

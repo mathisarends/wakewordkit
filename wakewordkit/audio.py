@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections import deque
-from collections.abc import Callable
+from collections.abc import AsyncIterable, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from typing import Protocol, Self
 
@@ -39,6 +40,20 @@ class AudioFormat:
 
 
 MODEL_AUDIO_FORMAT = AudioFormat(16_000, 1, "pcm_s16le")
+
+
+@dataclass(frozen=True, slots=True)
+class CapturedAudio:
+    """One opened device's byte stream and its exact PCM format."""
+
+    format: AudioFormat
+    frames: AsyncIterable[bytes]
+
+
+class AudioDevice(Protocol):
+    """Minimal contract for a WakewordKit-owned audio device."""
+
+    def open(self) -> AbstractAsyncContextManager[CapturedAudio]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,19 +193,6 @@ class AudioStream:
 _EOF = object()
 
 
-class _AudioInput(Protocol):
-    """Internal contract between a capture backend and the listen session."""
-
-    @property
-    def format(self) -> AudioFormat: ...
-
-    def read(self) -> bytes | np.ndarray: ...
-
-    def __enter__(self) -> Self: ...
-
-    def __exit__(self, *exc: object) -> None: ...
-
-
 class _Microphone:
     def __init__(
         self,
@@ -249,6 +251,46 @@ class _Microphone:
             self._stream = None
 
 
+class _SoundDeviceCapture:
+    """Default AudioDevice adapter around sounddevice's blocking input."""
+
+    def __init__(
+        self,
+        *,
+        sample_rate: int,
+        channels: int,
+        sample_format: str,
+        frame_size: int,
+        device: int | str | None,
+    ) -> None:
+        self._options = {
+            "sample_rate": sample_rate,
+            "channels": channels,
+            "sample_format": sample_format,
+            "frame_size": frame_size,
+            "device": device,
+        }
+
+    @asynccontextmanager
+    async def open(self):
+        source = _Microphone(**self._options)
+        await asyncio.to_thread(source.__enter__)
+
+        async def frames():
+            while True:
+                frame = await asyncio.to_thread(_read_or_eof, source.read)
+                if frame is _EOF:
+                    return
+                yield frame
+
+        try:
+            yield CapturedAudio(source.format, frames())
+        finally:
+            # Closing from the event-loop task also interrupts a pending
+            # blocking read during cancellation.
+            source.close()
+
+
 def _import_sounddevice():
     try:
         import sounddevice
@@ -257,3 +299,11 @@ def _import_sounddevice():
             "Microphone input requires the 'mic' extra: pip install 'wakewordkit[mic]'"
         ) from exc
     return sounddevice
+
+
+def _read_or_eof(read: Callable[[], bytes]) -> bytes | object:
+    # StopIteration cannot cross an asyncio Future boundary.
+    try:
+        return read()
+    except StopIteration:
+        return _EOF
