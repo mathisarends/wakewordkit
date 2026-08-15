@@ -1,6 +1,6 @@
 [project]
 name = "wakewordkit"
-version = "0.4.0"
+version = "0.5.0"
 description = "Lightweight, developer-friendly wake word detection built on openWakeWord."
 readme = "README.md"
 requires-python = ">=3.12"
