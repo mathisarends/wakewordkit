@@ -6,9 +6,14 @@ class FakeModel:
         self.paths = wakeword_model_paths
         self.vad_threshold = vad_threshold
         self.scores: dict[str, float] = {}
+        self.score_sequence = []
+        self.inputs = []
         self.reset_calls = 0
 
     def predict(self, audio):
+        self.inputs.append(audio.copy())
+        if self.score_sequence:
+            return self.score_sequence.pop(0)
         return self.scores
 
     def reset(self):

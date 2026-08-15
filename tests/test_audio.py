@@ -3,8 +3,7 @@ import sys
 import numpy as np
 import pytest
 
-from wakewordkit import AudioInput, CallableInput, Microphone
-from wakewordkit.audio import _import_sounddevice
+from wakewordkit.audio import AudioInput, CallableInput, Microphone, _import_sounddevice
 
 
 class FakeStream:
@@ -85,8 +84,7 @@ def test_microphone_read_flattens_stream_frames():
     mic = Microphone(frame_size=1280)
     mic._stream = FakeStream()
     frame = mic.read()
-    assert frame.shape == (1280,)
-    assert frame.dtype == np.int16
+    assert frame == np.zeros((1280, 1), dtype=np.int16).tobytes()
 
 
 def test_microphone_close_tears_down_the_stream():
