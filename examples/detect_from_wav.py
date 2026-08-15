@@ -1,47 +1,33 @@
-"""Run detection over a WAV file by implementing a custom AudioInput.
+"""Run detection over a caller-owned WAV stream."""
 
-No microphone required — great for testing. The WAV must be 16 kHz mono PCM.
-
-    python examples/detect_from_wav.py path/to/recording.wav
-"""
-
+import asyncio
 import sys
 import wave
 
-from wakewordkit import AudioInput, WakeWordDetector
+from wakewordkit import AudioFormat, WakeWordDetector
 
 _FRAME_SIZE = 1_280
 
 
-class WavInput(AudioInput):
-    def __init__(self, path: str) -> None:
-        self._wav = wave.open(path, "rb")
-        if (self._wav.getframerate(), self._wav.getnchannels()) != (16_000, 1):
-            raise ValueError("WAV must be 16 kHz mono PCM.")
+async def main(path: str) -> None:
+    detector = WakeWordDetector()
+    with wave.open(path, "rb") as wav:
+        format = AudioFormat(wav.getframerate(), wav.getnchannels(), "pcm_s16le")
 
-    def read(self) -> bytes:
-        frame = self._wav.readframes(_FRAME_SIZE)
-        if not frame:
-            raise StopIteration
-        return frame
+        async def frames():
+            while frame := wav.readframes(_FRAME_SIZE):
+                yield frame
+                await asyncio.sleep(0)
 
-    def __exit__(self, *exc: object) -> None:
-        self._wav.close()
-
-
-def main() -> None:
-    if len(sys.argv) < 2:
-        raise SystemExit("usage: python examples/detect_from_wav.py <recording.wav>")
-
-    detector = WakeWordDetector()  # all built-in wake words
-    with WavInput(sys.argv[1]) as source:
-        detections = list(detector.stream(source))
-
-    if not detections:
-        print("No wake word detected.")
-    for detection in detections:
-        print(f"detected {detection.name} ({detection.score:.2f})")
+        found = False
+        async for detection in detector.stream(frames(), format=format):
+            found = True
+            print(f"Detected {detection.name} ({detection.score:.2f})")
+        if not found:
+            print("No wake word detected.")
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) != 2:
+        raise SystemExit("usage: python examples/detect_from_wav.py <recording.wav>")
+    asyncio.run(main(sys.argv[1]))

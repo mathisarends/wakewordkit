@@ -1,28 +1,26 @@
-"""Listen for several built-in wake words at once and react per detection.
+"""Wait once for any of several built-in wake words."""
 
-python examples/multiple_wake_words.py
-"""
+import asyncio
 
 from wakewordkit import WakeWord, WakeWordDetector
 
 
-def main() -> None:
+async def main() -> None:
     detector = WakeWordDetector(
         WakeWord.HEY_JARVIS,
         WakeWord.HEY_MYCROFT,
         WakeWord.ALEXA,
         threshold=0.5,
     )
-    print(f"Listening for: {', '.join(detector.names)} (Ctrl+C to stop)")
-    for detection in detector.listen():
-        match detection.name:
-            case "hey_jarvis":
-                print("  Jarvis here.")
-            case "hey_mycroft":
-                print("  Mycroft here.")
-            case name:
-                print(f"  {name} ({detection.score:.2f})")
+    print(f"Listening for: {', '.join(detector.names)}")
+    activation = await detector.listen()
+    print(f"Detected {activation.name} ({activation.score:.2f})")
+
+    async with activation.audio:
+        async for chunk in activation.audio:
+            # Send the continuation to the handler chosen by activation.name.
+            print(f"\rReceived {len(chunk)} live audio bytes", end="", flush=True)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

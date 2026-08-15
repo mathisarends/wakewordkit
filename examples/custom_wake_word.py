@@ -1,28 +1,27 @@
-"""Plug in a custom-trained openWakeWord model alongside a built-in one.
+"""Use a custom openWakeWord model and retain the post-detection audio."""
 
-Pass the path to your own .onnx model:
-
-    python examples/custom_wake_word.py path/to/hey_computer.onnx
-"""
-
+import asyncio
 import sys
 
 from wakewordkit import CustomWakeWord, WakeWord, WakeWordDetector
 
 
-def main() -> None:
-    if len(sys.argv) < 2:
-        raise SystemExit("usage: python examples/custom_wake_word.py <model.onnx>")
-
+async def main(model_path: str) -> None:
     detector = WakeWordDetector(
         WakeWord.ALEXA,
-        CustomWakeWord("hey_computer", sys.argv[1]),
+        CustomWakeWord("hey_computer", model_path),
         threshold=0.6,
     )
-    print(f"Listening for: {', '.join(detector.names)} (Ctrl+C to stop)")
-    for detection in detector.listen():
-        print(f"  detected {detection.name} ({detection.score:.2f})")
+    print(f"Listening for: {', '.join(detector.names)}")
+    activation = await detector.listen()
+    print(f"Detected {activation.name} ({activation.score:.2f})")
+
+    async with activation.audio:
+        async for chunk in activation.audio:
+            print(f"\rHandoff chunk: {len(chunk)} bytes", end="", flush=True)
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) != 2:
+        raise SystemExit("usage: python examples/custom_wake_word.py <model.onnx>")
+    asyncio.run(main(sys.argv[1]))
