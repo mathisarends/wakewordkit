@@ -247,7 +247,9 @@ class Microphone(AudioInput):
             sample_rate = samplerate
         self._format = AudioFormat(sample_rate, channels, sample_format)
         self._frame_size = frame_size
-        self._device = device
+        # sounddevice selects PortAudio's configured default with ``None``.
+        # WakewordKit also accepts the more self-explanatory public spelling.
+        self._device = None if device == "default" else device
         self._stream = None
 
     @property

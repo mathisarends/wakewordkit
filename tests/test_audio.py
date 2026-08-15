@@ -71,6 +71,10 @@ def test_microphone_is_an_audio_input():
     assert issubclass(Microphone, AudioInput)
 
 
+def test_microphone_maps_default_device_to_portaudio_default():
+    assert Microphone(device="default")._device is None
+
+
 def test_microphone_read_before_open_raises():
     with pytest.raises(RuntimeError, match="context manager"):
         Microphone().read()
