@@ -1,5 +1,5 @@
 import asyncio
-import threading
+from contextlib import asynccontextmanager
 
 import numpy as np
 import pytest
@@ -8,6 +8,7 @@ from wakewordkit import (
     MODEL_AUDIO_FORMAT,
     Activation,
     AudioFormat,
+    CapturedAudio,
     CustomWakeWord,
     Detection,
     WakeWord,
@@ -20,41 +21,28 @@ NEGATIVE = {ALEXA_KEY: 0.1}
 POSITIVE = {ALEXA_KEY: 0.9}
 
 
-class ListInput:
-    def __init__(self, frames, format=MODEL_AUDIO_FORMAT):
-        self._frames = iter(frames)
-        self._format = format
-        self.enter_count = 0
-        self.exit_count = 0
+class FakeDevice:
+    def __init__(self, *sessions, format=MODEL_AUDIO_FORMAT):
+        self._sessions = iter(sessions)
+        self.format = format
+        self.open_count = 0
+        self.close_count = 0
 
-    @property
-    def format(self):
-        return self._format
+    @asynccontextmanager
+    async def open(self):
+        frames = next(self._sessions)
+        self.open_count += 1
 
-    def __enter__(self):
-        self.enter_count += 1
-        return self
+        async def iterate_list():
+            for frame in frames:
+                yield frame
+                await asyncio.sleep(0)
 
-    def __exit__(self, *exc):
-        self.exit_count += 1
-
-    def read(self):
-        return next(self._frames)
-
-
-class BlockingInput(ListInput):
-    def __init__(self):
-        super().__init__([])
-        self.reading = threading.Event()
-        self.closed = threading.Event()
-
-    def read(self):
-        self.reading.set()
-        self.closed.wait(2)
-        raise StopIteration
-
-    def close(self):
-        self.closed.set()
+        source = frames if hasattr(frames, "__aiter__") else iterate_list()
+        try:
+            yield CapturedAudio(self.format, source)
+        finally:
+            self.close_count += 1
 
 
 def pcm(*samples):
@@ -66,17 +54,12 @@ async def collect(stream):
         return [chunk async for chunk in stream]
 
 
-def detector_with_scores(fake_model, scores):
-    detector = WakeWordDetector(WakeWord.ALEXA, threshold=0.5, cooldown=0)
+def detector_with_scores(fake_model, scores, capture=None):
+    detector = WakeWordDetector(
+        WakeWord.ALEXA, threshold=0.5, cooldown=0, capture=capture
+    )
     detector._model.score_sequence = list(scores)
     return detector
-
-
-def install_sources(monkeypatch, *sources):
-    remaining = iter(sources)
-    monkeypatch.setattr(
-        "wakewordkit.detector._Microphone", lambda **kwargs: next(remaining)
-    )
 
 
 def test_validation_and_public_configuration(fake_model):
@@ -91,6 +74,16 @@ def test_validation_and_public_configuration(fake_model):
     assert detector.names == ("hey_jarvis",)
     assert detector.threshold == 0.7
     assert detector.cooldown == 2
+
+
+def test_custom_device_owns_capture_configuration(fake_model):
+    detector = detector_with_scores(fake_model, [], FakeDevice([]))
+
+    async def run():
+        with pytest.raises(ValueError, match="custom capture device"):
+            await detector.listen(sample_rate=24_000)
+
+    asyncio.run(run())
 
 
 def test_process_converts_explicit_format_and_detects(fake_model):
@@ -127,16 +120,13 @@ def test_stream_is_async_and_does_not_own_source(fake_model):
     assert closed  # natural exhaustion, not ownership-driven close
 
 
-def test_listen_hands_off_preroll_detection_and_live_without_gaps(
-    fake_model, monkeypatch
-):
+def test_listen_hands_off_preroll_detection_and_live_without_gaps(fake_model):
     format = AudioFormat(10, 1, "pcm_s16le")
-    source = ListInput([pcm(i) for i in range(1, 7)], format)
-    detector = detector_with_scores(fake_model, [NEGATIVE, NEGATIVE, POSITIVE])
-    install_sources(monkeypatch, source)
+    device = FakeDevice([pcm(i) for i in range(1, 7)], format=format)
+    detector = detector_with_scores(fake_model, [NEGATIVE, NEGATIVE, POSITIVE], device)
 
     async def run():
-        activation = await detector.listen(preroll=0.2, max_buffer=2, frame_size=1)
+        activation = await detector.listen(preroll=0.2, max_buffer=2)
         assert isinstance(activation, Activation)
         assert activation.audio.format == format
         return activation, await collect(activation.audio)
@@ -144,30 +134,28 @@ def test_listen_hands_off_preroll_detection_and_live_without_gaps(
     activation, chunks = asyncio.run(run())
     assert (activation.name, activation.score) == ("alexa", 0.9)
     assert chunks == [pcm(i) for i in range(1, 7)]
-    assert source.enter_count == source.exit_count == 1
+    assert device.open_count == device.close_count == 1
 
 
-def test_preroll_zero_still_includes_detection_frame(fake_model, monkeypatch):
+def test_preroll_zero_still_includes_detection_frame(fake_model):
     format = AudioFormat(10, 1, "pcm_s16le")
-    source = ListInput([pcm(i) for i in range(1, 5)], format)
-    detector = detector_with_scores(fake_model, [NEGATIVE, POSITIVE])
-    install_sources(monkeypatch, source)
+    device = FakeDevice([pcm(i) for i in range(1, 5)], format=format)
+    detector = detector_with_scores(fake_model, [NEGATIVE, POSITIVE], device)
 
     async def run():
-        activation = await detector.listen(preroll=0, max_buffer=1, frame_size=1)
+        activation = await detector.listen(preroll=0, max_buffer=1)
         return await collect(activation.audio)
 
     assert asyncio.run(run()) == [pcm(2), pcm(3), pcm(4)]
 
 
-def test_delayed_consumer_gets_frames_captured_after_detection(fake_model, monkeypatch):
+def test_delayed_consumer_gets_frames_captured_after_detection(fake_model):
     format = AudioFormat(100, 1, "pcm_s16le")
-    source = ListInput([pcm(i) for i in range(20)], format)
-    detector = detector_with_scores(fake_model, [POSITIVE])
-    install_sources(monkeypatch, source)
+    device = FakeDevice([pcm(i) for i in range(20)], format=format)
+    detector = detector_with_scores(fake_model, [POSITIVE], device)
 
     async def run():
-        activation = await detector.listen(preroll=0, max_buffer=1, frame_size=1)
+        activation = await detector.listen(preroll=0, max_buffer=1)
         await asyncio.sleep(0.05)
         return await collect(activation.audio)
 
@@ -175,15 +163,14 @@ def test_delayed_consumer_gets_frames_captured_after_detection(fake_model, monke
 
 
 def test_slow_consumer_buffer_is_bounded_and_reports_drop_oldest(
-    fake_model, monkeypatch
+    fake_model,
 ):
     format = AudioFormat(10, 1, "pcm_s16le")
-    source = ListInput([pcm(i) for i in range(10)], format)
-    detector = detector_with_scores(fake_model, [POSITIVE])
-    install_sources(monkeypatch, source)
+    device = FakeDevice([pcm(i) for i in range(10)], format=format)
+    detector = detector_with_scores(fake_model, [POSITIVE], device)
 
     async def run():
-        activation = await detector.listen(preroll=0, max_buffer=0.3, frame_size=1)
+        activation = await detector.listen(preroll=0, max_buffer=0.3)
         await asyncio.sleep(0.05)
         stats = activation.audio.stats
         chunks = await collect(activation.audio)
@@ -196,21 +183,13 @@ def test_slow_consumer_buffer_is_bounded_and_reports_drop_oldest(
     assert chunks == [pcm(7), pcm(8), pcm(9)]
 
 
-def test_waiting_reader_stops_when_stream_context_exits(fake_model, monkeypatch):
-    class LiveInput(BlockingInput):
-        def __init__(self):
-            super().__init__()
-            self._first = True
+def test_waiting_reader_stops_when_stream_context_exits(fake_model):
+    async def live_frames():
+        yield pcm(42)
+        await asyncio.Event().wait()
 
-        def read(self):
-            if self._first:
-                self._first = False
-                return pcm(42)
-            return super().read()
-
-    source = LiveInput()
-    detector = detector_with_scores(fake_model, [POSITIVE])
-    install_sources(monkeypatch, source)
+    device = FakeDevice(live_frames())
+    detector = detector_with_scores(fake_model, [POSITIVE], device)
 
     async def run():
         activation = await detector.listen(preroll=0)
@@ -223,18 +202,23 @@ def test_waiting_reader_stops_when_stream_context_exits(fake_model, monkeypatch)
         return first
 
     assert asyncio.run(run()) == pcm(42)
-    assert source.exit_count == 1
+    assert device.close_count == 1
 
 
-def test_cancellation_cleans_up_and_detector_can_be_reused(fake_model, monkeypatch):
-    blocking = BlockingInput()
-    detector = detector_with_scores(fake_model, [])
-    succeeding = ListInput([pcm(1)])
-    install_sources(monkeypatch, blocking, succeeding)
+def test_cancellation_cleans_up_and_detector_can_be_reused(fake_model):
+    reading = asyncio.Event()
+
+    async def blocking_frames():
+        reading.set()
+        await asyncio.Event().wait()
+        yield  # pragma: no cover
+
+    device = FakeDevice(blocking_frames(), [pcm(1)])
+    detector = detector_with_scores(fake_model, [], device)
 
     async def run():
         task = asyncio.create_task(detector.listen())
-        await asyncio.to_thread(blocking.reading.wait, 1)
+        await reading.wait()
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
@@ -244,18 +228,18 @@ def test_cancellation_cleans_up_and_detector_can_be_reused(fake_model, monkeypat
         return await collect(activation.audio)
 
     assert asyncio.run(run()) == [pcm(1)]
-    assert blocking.exit_count == 1
+    assert device.open_count == device.close_count == 2
 
 
 def test_capture_exception_cleans_up_and_detector_can_be_reused(
-    fake_model, monkeypatch
+    fake_model,
 ):
-    class BrokenInput(ListInput):
-        def read(self):
-            raise RuntimeError("capture failed")
+    async def broken_frames():
+        raise RuntimeError("capture failed")
+        yield  # pragma: no cover
 
-    detector = detector_with_scores(fake_model, [])
-    install_sources(monkeypatch, BrokenInput([]), ListInput([pcm(9)]))
+    device = FakeDevice(broken_frames(), [pcm(9)])
+    detector = detector_with_scores(fake_model, [], device)
 
     async def run():
         with pytest.raises(RuntimeError, match="capture failed"):
@@ -269,13 +253,13 @@ def test_capture_exception_cleans_up_and_detector_can_be_reused(
 
 def test_default_listen_constructs_and_opens_one_microphone(fake_model, monkeypatch):
     created = []
-    source = ListInput([pcm(1)])
+    device = FakeDevice([pcm(1)])
 
-    def microphone(**kwargs):
+    def capture(**kwargs):
         created.append(kwargs)
-        return source
+        return device
 
-    monkeypatch.setattr("wakewordkit.detector._Microphone", microphone)
+    monkeypatch.setattr("wakewordkit.detector._SoundDeviceCapture", capture)
     detector = detector_with_scores(fake_model, [POSITIVE])
 
     async def run():
@@ -285,7 +269,7 @@ def test_default_listen_constructs_and_opens_one_microphone(fake_model, monkeypa
     assert asyncio.run(run()) == [pcm(1)]
     assert len(created) == 1
     assert created[0]["device"] == "default"
-    assert source.enter_count == source.exit_count == 1
+    assert device.open_count == device.close_count == 1
 
 
 def test_streaming_resampling_has_no_chunk_drift():
