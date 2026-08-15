@@ -52,6 +52,47 @@ The handoff bytes remain in the capture format, exposed as
 `activation.audio.format`. Model conversion to 16 kHz mono PCM is internal and
 stateful across chunk boundaries.
 
+## Bring your own audio device
+
+Inject an application-owned device adapter when capture should not use
+`sounddevice`. The complete contract is one `open()` method returning an async
+context with an explicit format and an async byte source:
+
+```python
+from contextlib import asynccontextmanager
+
+from wakewordkit import AudioFormat, CapturedAudio, WakeWordDetector
+
+
+class MyAudioDevice:
+    @asynccontextmanager
+    async def open(self):
+        handle = await my_driver.open_input()
+
+        async def frames():
+            async for chunk in handle:
+                if chunk.overflowed:
+                    raise RuntimeError("Audio capture overflowed")
+                yield chunk.data
+
+        try:
+            yield CapturedAudio(
+                format=AudioFormat(24_000, 1, "pcm_s16le"),
+                frames=frames(),
+            )
+        finally:
+            await handle.close()
+
+
+detector = WakeWordDetector("hey_jarvis", capture=MyAudioDevice())
+activation = await detector.listen(preroll=0.2)
+```
+
+The custom device owns its device and format configuration. WakewordKit owns
+the opened context for the complete detection and handoff lifecycle. It still
+provides pre-roll, model conversion, buffering, overflow statistics for the
+handoff queue, cancellation, and deterministic shutdown.
+
 ## Buffering and overflow
 
 `max_buffer` bounds continuation memory in seconds. A slow consumer never
