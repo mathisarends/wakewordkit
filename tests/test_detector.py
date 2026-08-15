@@ -13,7 +13,6 @@ from wakewordkit import (
     WakeWord,
     WakeWordDetector,
 )
-from wakewordkit.audio import AudioInput
 from wakewordkit.detector import _StreamingNormalizer
 
 ALEXA_KEY = WakeWord.ALEXA.path.stem
@@ -21,7 +20,7 @@ NEGATIVE = {ALEXA_KEY: 0.1}
 POSITIVE = {ALEXA_KEY: 0.9}
 
 
-class ListInput(AudioInput):
+class ListInput:
     def __init__(self, frames, format=MODEL_AUDIO_FORMAT):
         self._frames = iter(frames)
         self._format = format
@@ -76,7 +75,7 @@ def detector_with_scores(fake_model, scores):
 def install_sources(monkeypatch, *sources):
     remaining = iter(sources)
     monkeypatch.setattr(
-        "wakewordkit.detector.Microphone", lambda **kwargs: next(remaining)
+        "wakewordkit.detector._Microphone", lambda **kwargs: next(remaining)
     )
 
 
@@ -276,7 +275,7 @@ def test_default_listen_constructs_and_opens_one_microphone(fake_model, monkeypa
         created.append(kwargs)
         return source
 
-    monkeypatch.setattr("wakewordkit.detector.Microphone", microphone)
+    monkeypatch.setattr("wakewordkit.detector._Microphone", microphone)
     detector = detector_with_scores(fake_model, [POSITIVE])
 
     async def run():

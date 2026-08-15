@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from abc import ABC, abstractmethod
 from collections import deque
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Self
+from typing import Protocol, Self
 
 import numpy as np
 
@@ -179,59 +178,20 @@ class AudioStream:
 _EOF = object()
 
 
-class AudioInput(ABC):
-    """Blocking audio input used internally by the default capture path."""
+class _AudioInput(Protocol):
+    """Internal contract between a capture backend and the listen session."""
 
     @property
-    def format(self) -> AudioFormat:
-        return MODEL_AUDIO_FORMAT
+    def format(self) -> AudioFormat: ...
 
-    @abstractmethod
-    def read(self) -> bytes | np.ndarray:
-        """Return the next frame, or raise ``StopIteration`` at EOF."""
+    def read(self) -> bytes | np.ndarray: ...
 
-    def __enter__(self) -> Self:
-        return self
+    def __enter__(self) -> Self: ...
 
-    def __exit__(self, *exc: object) -> None:
-        return None
-
-    def __iter__(self) -> Iterator[bytes | np.ndarray]:
-        return self
-
-    def __next__(self) -> bytes | np.ndarray:
-        return self.read()
+    def __exit__(self, *exc: object) -> None: ...
 
 
-class CallableInput(AudioInput):
-    def __init__(
-        self,
-        read: Callable[..., bytes | np.ndarray],
-        frame_size: int | None = None,
-        *,
-        format: AudioFormat = MODEL_AUDIO_FORMAT,
-        close: Callable[[], None] | None = None,
-    ) -> None:
-        self._read = read
-        self._frame_size = frame_size
-        self._format = format
-        self._close = close
-
-    @property
-    def format(self) -> AudioFormat:
-        return self._format
-
-    def read(self) -> bytes | np.ndarray:
-        if self._frame_size is None:
-            return self._read()
-        return self._read(self._frame_size)
-
-    def __exit__(self, *exc: object) -> None:
-        if self._close is not None:
-            self._close()
-
-
-class Microphone(AudioInput):
+class _Microphone:
     def __init__(
         self,
         *,

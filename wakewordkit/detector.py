@@ -14,9 +14,9 @@ from openwakeword.model import Model
 from wakewordkit.audio import (
     MODEL_AUDIO_FORMAT,
     AudioFormat,
-    AudioInput,
     AudioStream,
-    Microphone,
+    _AudioInput,
+    _Microphone,
 )
 from wakewordkit.models import CustomWakeWord, WakeWord
 
@@ -214,7 +214,7 @@ class _ListenSession:
         self,
         detector: WakeWordDetector,
         *,
-        source: AudioInput | None = None,
+        source: _AudioInput | None = None,
         device: int | str | None = None,
         sample_rate: int = 16_000,
         channels: int = 1,
@@ -231,7 +231,7 @@ class _ListenSession:
         self.source = (
             source
             if source is not None
-            else Microphone(
+            else _Microphone(
                 device=device,
                 sample_rate=sample_rate,
                 channels=channels,
