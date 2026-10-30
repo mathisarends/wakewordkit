@@ -1,0 +1,85 @@
+{
+  "kind": "engineering smoke benchmark; silence, not recognition quality",
+  "python": "3.14.0 (main, Oct 10 2025, 12:48:29) [MSC v.1944 64 bit (AMD64)]",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "processor": "Intel64 Family 6 Model 197 Stepping 2, GenuineIntel",
+  "logical_cpus": 16,
+  "versions": {
+    "wakewordkit": "0.5.0",
+    "openwakeword": "0.4.0",
+    "numpy": "2.5.1",
+    "soxr": "1.1.0",
+    "onnxruntime": "1.31.1"
+  },
+  "public_import_ms": 213.43530000012834,
+  "sample_rate": 16000,
+  "block_samples": 1280,
+  "warmup_blocks": 8,
+  "iterations": 150,
+  "scenarios": [
+    {
+      "models": 1,
+      "api": "sync",
+      "construction_ms": 1350.4141,
+      "reset_ms": 202.573,
+      "call_wall_ms": {
+        "median": 1.73835,
+        "p95": 2.478949999999999
+      },
+      "call_cpu_ms": {
+        "median": 0.0,
+        "p95": 15.625
+      },
+      "cpu_percent_of_one_core_at_realtime": 2.213541666666667,
+      "sampled_peak_rss_mib": 213.2578125
+    },
+    {
+      "models": 1,
+      "api": "async",
+      "construction_ms": 1452.4706,
+      "reset_ms": 396.5999,
+      "call_wall_ms": {
+        "median": 4.55835,
+        "p95": 16.022489999999966
+      },
+      "call_cpu_ms": {
+        "median": 0.0,
+        "p95": 15.625
+      },
+      "cpu_percent_of_one_core_at_realtime": 5.078125,
+      "sampled_peak_rss_mib": 213.39453125
+    },
+    {
+      "models": 4,
+      "api": "sync",
+      "construction_ms": 2532.5273,
+      "reset_ms": 274.5191,
+      "call_wall_ms": {
+        "median": 2.5606,
+        "p95": 4.185089999999997
+      },
+      "call_cpu_ms": {
+        "median": 0.0,
+        "p95": 15.625
+      },
+      "cpu_percent_of_one_core_at_realtime": 3.2552083333333335,
+      "sampled_peak_rss_mib": 218.3984375
+    },
+    {
+      "models": 4,
+      "api": "async",
+      "construction_ms": 1717.5806,
+      "reset_ms": 381.8867,
+      "call_wall_ms": {
+        "median": 2.7935999999999996,
+        "p95": 5.427139999999995
+      },
+      "call_cpu_ms": {
+        "median": 0.0,
+        "p95": 15.625
+      },
+      "cpu_percent_of_one_core_at_realtime": 4.036458333333334,
+      "sampled_peak_rss_mib": 218.53125
+    }
+  ]
+}
