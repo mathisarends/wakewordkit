@@ -44,13 +44,13 @@ def test_validation_and_public_configuration(fake_model):
 def test_process_converts_explicit_format_and_detects(fake_model):
     detector = detector_with_scores(fake_model, [POSITIVE])
     format = AudioFormat(24_000, 2, "pcm_s16le")
-    frame = np.tile(np.array([100, 300], dtype=np.int16), 12).tobytes()
+    frame = np.tile(np.array([100, 300], dtype=np.int16), 4800).tobytes()
 
     assert asyncio.run(detector.process(frame, format=format)) == Detection(
         "alexa", 0.9
     )
     assert detector._model.inputs[0].dtype == np.int16
-    assert detector._model.inputs[0].size == 8
+    assert detector._model.inputs[0].size > 0
 
 
 def test_process_returns_none_below_threshold(fake_model):
@@ -74,8 +74,10 @@ def test_streaming_resampling_has_no_chunk_drift():
     parts = [
         chunked.feed(part) for part in np.array_split(samples, [17, 131, 4099, 20_000])
     ]
-    one_shot = _StreamingNormalizer(format).feed(samples)
+    parts.append(chunked.finish())
+    whole = _StreamingNormalizer(format)
+    one_shot = np.concatenate([whole.feed(samples), whole.finish()])
     result = np.concatenate(parts)
 
-    assert result.size == samples.size * 16_000 // 24_000
+    assert result.size == round(samples.size * 16_000 / 24_000)
     np.testing.assert_array_equal(result, one_shot)

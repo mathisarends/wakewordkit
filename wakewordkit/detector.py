@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import numpy as np
 from openwakeword.model import Model
 
+from wakewordkit._audio import _StreamingNormalizer
 from wakewordkit.audio import MODEL_AUDIO_FORMAT, AudioFormat
 from wakewordkit.models import CustomWakeWord, WakeWord
 
@@ -125,71 +126,6 @@ class WakeWordDetector:
         with self._model_lock:
             self._model.reset()
             self._last_trigger = None
-
-
-class _StreamingNormalizer:
-    """Stateful PCM decoder/downmixer/resampler with rational sample timing."""
-
-    def __init__(self, format: AudioFormat) -> None:
-        self.format = format
-        self._buffer = np.empty(0, dtype=np.float64)
-        self._buffer_start = 0
-        self._seen = 0
-        self._produced = 0
-
-    def feed(self, frame: bytes | np.ndarray) -> np.ndarray:
-        samples = _decode_mono(frame, self.format)
-        if samples.size == 0:
-            return np.empty(0, dtype=np.int16)
-        self._buffer = np.concatenate((self._buffer, samples))
-        self._seen += samples.size
-        target_total = (
-            self._seen * MODEL_AUDIO_FORMAT.sample_rate // self.format.sample_rate
-        )
-        if target_total == self._produced:
-            return np.empty(0, dtype=np.int16)
-
-        output_indexes = np.arange(self._produced, target_total, dtype=np.int64)
-        numerators = output_indexes * self.format.sample_rate
-        left_global = numerators // MODEL_AUDIO_FORMAT.sample_rate
-        fractions = (
-            numerators % MODEL_AUDIO_FORMAT.sample_rate
-        ) / MODEL_AUDIO_FORMAT.sample_rate
-        left = left_global - self._buffer_start
-        right = np.minimum(left + 1, self._buffer.size - 1)
-        output = (
-            self._buffer[left] * (1.0 - fractions) + self._buffer[right] * fractions
-        )
-        self._produced = int(target_total)
-
-        next_numerator = self._produced * self.format.sample_rate
-        keep_global = next_numerator // MODEL_AUDIO_FORMAT.sample_rate
-        discard = max(0, int(keep_global - self._buffer_start))
-        # Retain one interpolation neighbour when it still exists.
-        discard = min(discard, max(0, self._buffer.size - 1))
-        if discard:
-            self._buffer = self._buffer[discard:]
-            self._buffer_start += discard
-        return np.clip(np.rint(output * 32768.0), -32768, 32767).astype(np.int16)
-
-
-def _decode_mono(frame: bytes | np.ndarray, format: AudioFormat) -> np.ndarray:
-    if isinstance(frame, bytes | bytearray | memoryview):
-        dtype = "<i2" if format.sample_format == "pcm_s16le" else "<f4"
-        array = np.frombuffer(frame, dtype=dtype)
-        integer_input = format.sample_format == "pcm_s16le"
-    else:
-        array = np.asarray(frame).reshape(-1)
-        integer_input = np.issubdtype(array.dtype, np.integer)
-    usable = array.size // format.channels * format.channels
-    array = array[:usable]
-    if format.channels > 1:
-        array = array.reshape(-1, format.channels).astype(np.float64).mean(axis=1)
-    else:
-        array = array.astype(np.float64)
-    if integer_input:
-        array /= 32768.0
-    return array
 
 
 def _resolve_spec(spec: WakeWordSpec) -> WakeWord | CustomWakeWord:

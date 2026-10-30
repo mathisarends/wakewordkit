@@ -1,19 +1,30 @@
+"""Audio formats and the public PCM input contract."""
+
 from dataclasses import dataclass
+from typing import Literal
+
+import numpy as np
+from numpy.typing import NDArray
+
+type SampleFormat = Literal["pcm_s16le", "pcm_f32le"]
+type AudioFrame = (
+    bytes | bytearray | memoryview | NDArray[np.int16] | NDArray[np.float32]
+)
 
 
 @dataclass(frozen=True, slots=True)
 class AudioFormat:
-    """The contract of an interleaved PCM frame source."""
+    """PCM bytes are interleaved; arrays use (samples, channels), or mono (samples,)."""
 
     sample_rate: int
     channels: int
-    sample_format: str
+    sample_format: SampleFormat
 
     def __post_init__(self) -> None:
-        if self.sample_rate <= 0:
-            raise ValueError("sample_rate must be positive.")
-        if self.channels <= 0:
-            raise ValueError("channels must be positive.")
+        for name in ("sample_rate", "channels"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError(f"{name} must be a positive integer.")
         if self.sample_format not in {"pcm_s16le", "pcm_f32le"}:
             raise ValueError("sample_format must be 'pcm_s16le' or 'pcm_f32le'.")
 
