@@ -77,3 +77,10 @@ def test_incompatible_feature_model_is_rejected():
     path = WakeWord.ALEXA.path.parent / "embedding_model.onnx"
     with pytest.raises(ValueError, match="binary openWakeWord"):
         WakeWordDetector(CustomWakeWord("features", path))
+
+
+def test_all_bundled_models_load_and_run_together():
+    detector = WakeWordDetector()
+    assert len(detector.names) == 4
+    assert detector.process_all_sync(np.zeros(1280 * 8, np.int16)) == ()
+    assert detector.finish_sync() == ()

@@ -1,6 +1,7 @@
 import warnings
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from wakewordkit._backend import _validate_session, create_model
@@ -38,8 +39,16 @@ def test_backend_initialization_warnings_remain_visible(monkeypatch):
 
     def load(**kwargs):
         warnings.warn("provider warning", UserWarning, stacklevel=2)
-        return SimpleNamespace(models={"custom": session([1, 16, 96], [1, 1])})
+        return SimpleNamespace(
+            models={"custom": session([1, 16, 96], [1, 1])},
+            preprocessor=SimpleNamespace(feature_buffer=np.empty((116, 96))),
+        )
 
     monkeypatch.setattr(openwakeword.model, "Model", load)
     with pytest.warns(UserWarning, match="provider warning"):
         create_model(["custom.onnx"], 0.0)
+
+
+@pytest.mark.parametrize("batch", [1, None, "dynamic_batch"])
+def test_binary_classifier_can_use_dynamic_batch(batch):
+    _validate_session(session([batch, 16, 96], [batch, 1]), "binary")
