@@ -26,3 +26,12 @@ def test_audio_format_validation(format, message):
         return
     with pytest.raises(ValueError, match=message):
         AudioFormat(*format)
+
+
+@pytest.mark.parametrize(
+    "rate,channels",
+    [(True, 1), (1.5, 1), (16000, 1.5), (16000, True), (float("nan"), 1), (16000, 0)],
+)
+def test_format_parameters_must_be_positive_integers(rate, channels):
+    with pytest.raises(ValueError):
+        AudioFormat(rate, channels, "pcm_s16le")

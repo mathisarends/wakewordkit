@@ -10,74 +10,135 @@ from wakewordkit import (
     WakeWord,
     WakeWordDetector,
 )
-from wakewordkit.detector import _StreamingNormalizer
 
-ALEXA_KEY = WakeWord.ALEXA.path.stem
-NEGATIVE = {ALEXA_KEY: 0.1}
-POSITIVE = {ALEXA_KEY: 0.9}
-
-
-def pcm(*samples):
-    return np.asarray(samples, dtype="<i2").tobytes()
+KEY = WakeWord.ALEXA.path.stem
+POSITIVE = {KEY: 0.9}
+BLOCK = np.zeros(1280, dtype=np.int16)
 
 
-def detector_with_scores(fake_model, scores):
-    detector = WakeWordDetector(WakeWord.ALEXA, threshold=0.5, cooldown=0)
-    detector._model.score_sequence = list(scores)
-    return detector
+def detector(fake_model, **kwargs):
+    result = WakeWordDetector("alexa", **kwargs)
+    result._model.scores = POSITIVE
+    return result
 
 
-def test_validation_and_public_configuration(fake_model):
-    with pytest.raises(ValueError, match="threshold"):
-        WakeWordDetector(WakeWord.ALEXA, threshold=1.5)
-    with pytest.raises(ValueError, match="cooldown"):
-        WakeWordDetector(WakeWord.ALEXA, cooldown=-1)
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        ("threshold", 1.5),
+        ("threshold", float("nan")),
+        ("vad_threshold", -1),
+        ("vad_threshold", float("nan")),
+        ("vad_threshold", 1.1),
+        ("cooldown", -1),
+        ("cooldown", float("nan")),
+        ("cooldown", float("inf")),
+    ],
+)
+def test_invalid_configuration(fake_model, name, value):
+    with pytest.raises(ValueError, match=name):
+        WakeWordDetector("alexa", **{name: value})
+
+
+def test_configuration_and_missing_model(fake_model):
     with pytest.raises(FileNotFoundError):
         WakeWordDetector(CustomWakeWord("missing", "missing.onnx"))
-
-    detector = WakeWordDetector("hey_jarvis", threshold=0.7, cooldown=2)
-    assert detector.names == ("hey_jarvis",)
-    assert detector.threshold == 0.7
-    assert detector.cooldown == 2
-
-
-def test_process_converts_explicit_format_and_detects(fake_model):
-    detector = detector_with_scores(fake_model, [POSITIVE])
-    format = AudioFormat(24_000, 2, "pcm_s16le")
-    frame = np.tile(np.array([100, 300], dtype=np.int16), 4800).tobytes()
-
-    assert asyncio.run(detector.process(frame, format=format)) == Detection(
-        "alexa", 0.9
+    result = WakeWordDetector("hey_jarvis", threshold=0.7, cooldown=2)
+    assert (result.names, result.threshold, result.cooldown) == (
+        ("hey_jarvis",),
+        0.7,
+        2,
     )
-    assert detector._model.inputs[0].dtype == np.int16
-    assert detector._model.inputs[0].size > 0
 
 
-def test_process_returns_none_below_threshold(fake_model):
-    detector = detector_with_scores(fake_model, [NEGATIVE])
-    assert asyncio.run(detector.process(pcm(1))) is None
+def test_async_and_sync_agree(fake_model):
+    result = detector(fake_model, cooldown=0)
+    assert asyncio.run(result.process(BLOCK)) == Detection("alexa", 0.9, 1280)
+    assert result.process_sync(BLOCK) == Detection("alexa", 0.9, 2560)
+    assert result.process_sync(BLOCK).timestamp == 0.24
 
 
-def test_process_applies_cooldown_and_resets_after_detection(fake_model):
-    detector = WakeWordDetector(WakeWord.ALEXA, cooldown=60)
-    detector._model.score_sequence = [POSITIVE, POSITIVE]
+def test_small_frames_are_buffered_without_loss(fake_model):
+    result = detector(fake_model, cooldown=0)
+    source = np.arange(2567, dtype=np.int16)
+    events = []
+    for part in np.split(source, [1, 321, 401, 800, 2000]):
+        events.extend(result.process_all_sync(part))
+    events.extend(result.finish_sync())
+    actual = np.concatenate(result._model.inputs)
+    np.testing.assert_array_equal(actual[: len(source)], source)
+    assert not actual[len(source) :].any()
+    assert [event.sample_index for event in events] == [1280, 2560, 2567]
 
-    assert asyncio.run(detector.process(pcm(1))) == Detection("alexa", 0.9)
-    assert asyncio.run(detector.process(pcm(2))) is None
-    assert detector._model.reset_calls == 1
+
+def test_zero_cooldown_has_no_hidden_backend_reset(fake_model):
+    result = detector(fake_model, cooldown=0)
+    assert len(result.process_all_sync(np.tile(BLOCK, 8))) == 8
+    assert result._model.reset_calls == 0
 
 
-def test_streaming_resampling_has_no_chunk_drift():
-    format = AudioFormat(24_000, 1, "pcm_s16le")
-    samples = np.arange(24_003, dtype=np.int16)
-    chunked = _StreamingNormalizer(format)
-    parts = [
-        chunked.feed(part) for part in np.array_split(samples, [17, 131, 4099, 20_000])
+def test_cooldown_uses_audio_time_and_advances_on_negative_frames(fake_model):
+    result = detector(fake_model, cooldown=0.16)
+    assert [d.sample_index for d in result.process_all_sync(np.tile(BLOCK, 5))] == [
+        1280,
+        3840,
+        6400,
     ]
-    parts.append(chunked.finish())
-    whole = _StreamingNormalizer(format)
-    one_shot = np.concatenate([whole.feed(samples), whole.finish()])
-    result = np.concatenate(parts)
+    result._model.scores = {KEY: 0.1}
+    assert result.process_sync(BLOCK) is None
+    result._model.scores = POSITIVE
+    assert result.process_sync(BLOCK).sample_index == 8960
 
-    assert result.size == round(samples.size * 16_000 / 24_000)
-    np.testing.assert_array_equal(result, one_shot)
+
+@pytest.mark.parametrize("score", [0.1, float("nan"), float("inf"), -1.0, 1.1, 0.0])
+def test_invalid_or_low_scores_cannot_trigger(fake_model, score):
+    result = detector(fake_model)
+    result._model.scores = {KEY: score}
+    assert result.process_sync(BLOCK) is None
+
+
+def test_format_change_requires_reset(fake_model):
+    result = detector(fake_model)
+    result.process_sync(BLOCK)
+    changed = AudioFormat(48000, 1, "pcm_s16le")
+    with pytest.raises(ValueError, match="reset"):
+        result.process_sync(BLOCK, format=changed)
+    result.reset(format=changed)
+    assert result.process_sync(BLOCK) is None
+
+
+def test_reset_recreates_backend_and_all_stream_state(fake_model):
+    result = detector(fake_model)
+    result.process_all_sync(np.ones(1400, dtype=np.int16))
+    previous = result._model
+    result.reset()
+    assert result._model is not previous
+    result._model.scores = POSITIVE
+    assert result.process_sync(BLOCK) == Detection("alexa", 0.9, 1280)
+    np.testing.assert_array_equal(result._model.inputs[0], BLOCK)
+
+
+def test_finish_closes_stream_until_reset(fake_model):
+    result = detector(fake_model)
+    assert result.finish_sync() == ()
+    with pytest.raises(RuntimeError, match="reset"):
+        result.process_sync(BLOCK)
+    with pytest.raises(RuntimeError, match="reset"):
+        result.finish_sync()
+    result.reset()
+    assert result.process_sync(BLOCK) is None
+
+
+def test_large_frame_convenience_api_returns_first_detection(fake_model):
+    result = detector(fake_model, cooldown=0)
+    assert result.process_sync(np.tile(BLOCK, 3)).sample_index == 1280
+    assert len(result._model.inputs) == 3
+
+
+def test_unexpected_backend_labels_require_reset(fake_model):
+    result = detector(fake_model)
+    result._model.scores = {"unexpected": 0.9}
+    with pytest.raises(ValueError, match="labels"):
+        result.process_sync(BLOCK)
+    with pytest.raises(RuntimeError, match="reset"):
+        result.process_sync(BLOCK)

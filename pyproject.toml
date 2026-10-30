@@ -44,6 +44,7 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["integration: real openWakeWord inference and state tests"]
 addopts = "--cov=wakewordkit --cov-report=term-missing"
 
 [tool.coverage.run]

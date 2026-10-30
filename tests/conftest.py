@@ -11,6 +11,7 @@ class FakeModel:
         self.reset_calls = 0
 
     def predict(self, audio):
+        assert audio.dtype.name == "int16" and audio.shape == (1280,)
         self.inputs.append(audio.copy())
         if self.score_sequence:
             return self.score_sequence.pop(0)
@@ -22,5 +23,5 @@ class FakeModel:
 
 @pytest.fixture
 def fake_model(monkeypatch):
-    monkeypatch.setattr("wakewordkit.detector.Model", FakeModel)
+    monkeypatch.setattr("wakewordkit.detector.create_model", FakeModel)
     return FakeModel
