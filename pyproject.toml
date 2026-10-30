@@ -16,10 +16,9 @@ classifiers = [
 ]
 dependencies = [
     "numpy>=2.0",
-    # Pinned: 0.4.0 is the last release that bundles the .onnx models in the
-    # wheel. Later versions download them at runtime and rename the model
-    # argument to `wakeword_models=`, which silently loads every model instead.
+    # 0.4.0 bundles the ONNX models; newer releases change the backend API.
     "openwakeword==0.4.0",
+    "soxr>=1.0,<2",
 ]
 
 [project.optional-dependencies]
