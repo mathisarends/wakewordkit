@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import math
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -148,40 +149,77 @@ class WakeWordDetector:
     async def process(
         self, frame: AudioFrame, *, format: AudioFormat | None = None
     ) -> Detection | None:
-        """Run synchronous processing off the event loop."""
-        return await asyncio.to_thread(self.process_sync, frame, format=format)
+        """Return the first detection, deferring cancellation of accepted work."""
+        detections = await self.process_all(frame, format=format)
+        return detections[0] if detections else None
 
     async def process_all(
         self, frame: AudioFrame, *, format: AudioFormat | None = None
     ) -> tuple[Detection, ...]:
-        return await asyncio.to_thread(self.process_all_sync, frame, format=format)
+        """Return every detection; reject overlaps before submitting worker work."""
+        self._acquire()
+        try:
+            # Capture mutable input before handing it to another thread.
+            snapshot = _snapshot(frame)
+            return await self._run_reserved(
+                lambda: self._process_frame(snapshot, format)
+            )
+        finally:
+            self._operation_lock.release()
+
+    async def _run_reserved(
+        self, operation: Callable[[], tuple[Detection, ...]]
+    ) -> tuple[Detection, ...]:
+        # An executor Future is not an independently cancellable asyncio Task.
+        # Shield it, drain it even on repeated caller cancellation, and deliver
+        # its result before allowing any subsequent operation on this stream.
+        worker = asyncio.get_running_loop().run_in_executor(None, operation)
+        while True:
+            try:
+                return await asyncio.shield(worker)
+            except asyncio.CancelledError:
+                if worker.cancelled():
+                    raise
+                task = asyncio.current_task()
+                if task is not None:
+                    task.uncancel()
+                if worker.done():
+                    return worker.result()
 
     def finish_sync(self) -> tuple[Detection, ...]:
         """Flush the resampler, zero-pad the last model block, then close."""
         self._acquire()
         try:
-            self._ensure_open()
-            detections = list(
-                self._consume(
-                    self._normalizer.finish()
-                    if self._normalizer is not None
-                    else np.empty(0, dtype=np.int16)
-                )
-            )
-            if self._pending.size:
-                valid = self._pending.size
-                block = np.pad(self._pending, (0, _MODEL_BLOCK - valid))
-                self._pending = np.empty(0, dtype=np.int16)
-                detection = self._predict(block, valid)
-                if detection is not None:
-                    detections.append(detection)
-            self._finished = True
-            return tuple(detections)
+            return self._finish_stream()
         finally:
             self._operation_lock.release()
 
+    def _finish_stream(self) -> tuple[Detection, ...]:
+        self._ensure_open()
+        detections = list(
+            self._consume(
+                self._normalizer.finish()
+                if self._normalizer is not None
+                else np.empty(0, dtype=np.int16)
+            )
+        )
+        if self._pending.size:
+            valid = self._pending.size
+            block = np.pad(self._pending, (0, _MODEL_BLOCK - valid))
+            self._pending = np.empty(0, dtype=np.int16)
+            detection = self._predict(block, valid)
+            if detection is not None:
+                detections.append(detection)
+        self._finished = True
+        return tuple(detections)
+
     async def finish(self) -> tuple[Detection, ...]:
-        return await asyncio.to_thread(self.finish_sync)
+        """Finish off the event loop, deferring cancellation of accepted work."""
+        self._acquire()
+        try:
+            return await self._run_reserved(self._finish_stream)
+        finally:
+            self._operation_lock.release()
 
     def reset(self, *, format: AudioFormat | None = None) -> None:
         """Start a fresh stream including feature, VAD and cooldown state."""
@@ -272,3 +310,13 @@ def _resolve_spec(spec: WakeWordSpec) -> WakeWord | CustomWakeWord:
         if spec in {builtin.label, builtin.name.lower(), builtin.value}:
             return builtin
     raise ValueError(f"Unknown built-in wake word: {spec!r}")
+
+
+def _snapshot(frame: AudioFrame) -> AudioFrame:
+    if isinstance(frame, np.ndarray):
+        return frame.copy()
+    if isinstance(frame, memoryview) and not frame.c_contiguous:
+        raise ValueError("PCM bytes must be contiguous.")
+    if isinstance(frame, bytes | bytearray | memoryview):
+        return bytes(frame)
+    raise TypeError("frame must be PCM bytes, bytearray, memoryview or a NumPy array.")
