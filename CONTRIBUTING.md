@@ -46,3 +46,5 @@ add a focused regression test for behavior changes.
 See [docs/EVALUATION.md](docs/EVALUATION.md) before making recognition-quality or
 hardware-performance claims. Real positive and negative recordings are required;
 passing synthetic/silence engineering tests alone cannot establish those claims.
+
+See [docs/RELEASING.md](docs/RELEASING.md) for isolated release preparation and publication.
