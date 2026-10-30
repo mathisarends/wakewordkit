@@ -1,6 +1,6 @@
 [project]
 name = "wakewordkit"
-version = "0.5.0"
+dynamic = ["version"]
 description = "Lightweight, developer-friendly wake word detection built on openWakeWord."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -32,6 +32,9 @@ examples = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.version]
+path = "wakewordkit/__init__.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["wakewordkit"]
 
@@ -57,5 +60,16 @@ exclude_also = ["raise NotImplementedError", "@(abc\\.)?abstractmethod"]
 dev = [
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
-    "ruff>=0.16.0",
+    "ruff==0.16.0",
+    "mypy>=1.19,<2",
+    "psutil>=7,<8",
 ]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["wakewordkit", "tests/typing/consumer.py"]
+
+[[tool.mypy.overrides]]
+module = ["openwakeword.*", "soxr"]
+ignore_missing_imports = true

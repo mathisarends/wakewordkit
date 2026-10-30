@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -17,7 +18,9 @@ def main() -> None:
             check=True,
         )
         environment = work / "env"
-        subprocess.run(["uv", "venv", str(environment)], check=True)
+        subprocess.run(
+            ["uv", "venv", "--python", sys.executable, str(environment)], check=True
+        )
         python = environment / (
             "Scripts/python.exe" if os.name == "nt" else "bin/python"
         )
@@ -38,11 +41,14 @@ import wakewordkit
 from wakewordkit import WakeWord, WakeWordDetector
 assert Path(wakewordkit.__file__).is_relative_to(Path(__import__('sys').prefix))
 assert metadata.version('openwakeword') == '0.4.0'
+assert metadata.version('wakewordkit') == wakewordkit.__version__
+assert Path(wakewordkit.__file__).with_name('py.typed').is_file()
 assert all(word.path.is_file() for word in WakeWord)
 detector = WakeWordDetector()
 assert len(detector.names) == 4
 import asyncio
-asyncio.run(detector.process(np.zeros(1280, dtype=np.int16)))
+asyncio.run(detector.process(np.zeros(320, dtype=np.int16)))
+asyncio.run(detector.finish())
 print('Installed wheel: model assets and real inference OK')
 """,
             ],

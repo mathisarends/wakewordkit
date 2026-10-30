@@ -1,39 +1,48 @@
 # Contributing
 
-Thanks for helping improve wakewordkit! This project uses
-[uv](https://docs.astral.sh/uv/) and targets Python 3.14+.
+WakewordKit uses [uv](https://docs.astral.sh/uv/) and supports Python 3.12+.
 
 ## Setup
 
 ```bash
-uv sync --dev          # core + dev tools
-uv sync --extra mic    # add microphone support to try the examples
+uv sync --locked --dev
+uv sync --locked --dev --extra examples  # optional hardware/provider examples
 ```
 
 ## Checks
 
-Run these before opening a pull request — CI runs the same commands:
+CI runs these on Linux and Windows with Python 3.12, 3.13 and 3.14:
 
 ```bash
 uv run ruff check .
-uv run ruff format .
+uv run ruff format --check .
+uv run mypy
 uv run pytest
+uv run python tools/wheel_smoke.py
 ```
 
-Optionally install the pre-commit hooks to run linting and formatting on every
-commit:
+Use `uv run ruff format .` to apply formatting. Ruff is pinned to the same version
+in the dev group and pre-commit hooks. Optionally run `uvx pre-commit install`.
+The package version has one source: `wakewordkit.__version__`, read by Hatch.
 
-```bash
-uvx pre-commit install
-```
+## Tests and contracts
 
-## Tests
+Unit tests use a fake backend that requires real 1,280-sample model blocks.
+`uv run pytest -m integration` runs real inference and checks frame partitioning,
+backend/VAD reset against fresh instances and model compatibility.
+`uv run pytest -m "not integration"` skips those integration tests.
+Resampling tests exercise the actual filter, passband and alias rejection.
+Concurrency/device tests use controlled worker barriers and mocked hardware.
 
-Tests cover logic, not model behavior — the openWakeWord model is faked so they
-stay fast and deterministic (see `tests/conftest.py`). New logic should come
-with a test; please keep them focused rather than chasing full line coverage.
+`tools/wheel_smoke.py` builds a wheel, installs it with its dependencies into a
+fresh temporary environment and runs inference outside the source tree. It
+checks model assets and package version consistency, then deletes the temporary
+environment. It requires uv and package-index access on first use.
 
-## Pull requests
+Strict mypy covers the package and a public API consumer. Update the consumer
+when changing public types. Preserve the single ordered stream contract and
+add a focused regression test for behavior changes.
 
-Keep changes small and focused, make sure the checks above pass, and describe
-what changed and why.
+See [docs/EVALUATION.md](docs/EVALUATION.md) before making recognition-quality or
+hardware-performance claims. Real positive and negative recordings are required;
+passing synthetic/silence engineering tests alone cannot establish those claims.
